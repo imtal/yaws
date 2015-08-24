@@ -160,7 +160,7 @@ do_lock([H],Lock,Table) ->
         {value,{H,Locks,Children}} ->
             case do_lock_check(Locks,Lock#lock.id) of
                 this ->
-                    % refresh lock only when same resource
+                    % refresh lock when same resource
                     Locks1 = do_lock_refresh(Locks,Lock),
                     lists:keyreplace(H,1,Table,{H,Locks1,Children});
                 {shared,_} when Lock#lock.scope == shared ->
@@ -177,6 +177,10 @@ do_lock([H|T],Lock,Table) ->
     case lists:keysearch(H,1,Table) of
         {value,{H,Locks,Children}} -> %%%% hier gebleven
             case do_lock_check(Locks,Lock#lock.id) of
+                this ->
+                    % refresh lock also when on higher resource (indirect)
+                    Locks1 = do_lock_refresh(Locks,Lock),
+                    lists:keyreplace(H,1,Table,{H,Locks1,Children});
                 {_,infinity} when Lock#lock.scope == exclusive ->
                     throw(locked);
                 _ ->
