@@ -523,7 +523,7 @@ propfind_response(Props,A,R) ->
     Url = yaws_api:url_encode(R#resource.name),
     case Props of
         [allprop] ->
-            AllProp = [ prop_get(N,A,R) || N <- allprops(R) ],
+            AllProp = [ prop_get(N,A,R) || N <- allprops(A,R) ],
             AllSorted = prop_sort(AllProp),
             {200, Results} = lists:keyfind(200,1,AllSorted),
             [{'D:href', [], [Url]},
@@ -535,7 +535,7 @@ propfind_response(Props,A,R) ->
                         'DAV:' -> {list_to_atom("D:"++atom_to_list(P)),[],[]};
                         _ -> {P,[{'xmlns',NS}],[]}
                         end
-                      || {NS,P} <-allprops(R) ],
+                      || {NS,P} <-allprops(A,R) ],
             [{'D:href', [], [Url]},
              {'D:propstat', [], [
                 {'D:prop', [], Results},{status, [],["HTTP/1.1 200 OK"]}
@@ -589,7 +589,7 @@ prop_status(Status) ->
 %% Available props can differ per resource
 %% For proposed Microsoft extensions see: draft-hopmann-collection-props-00.txt
 %%
-allprops(R) ->
+allprops(A,R) ->
     F = R#resource.info,
     C = get(compatibility),
     %% default property set
@@ -603,8 +603,8 @@ allprops(R) ->
           {'DAV:',getetag},
           {'DAV:',getlastmodified},
           {'DAV:',lockdiscovery}, % class 2 compliancy
-          %%{'DAV:','quota-avialable-bytes'}    % RFC4331
-                                         %{'DAV:','quota-used-bytes'} % RFC4331
+          %%{'DAV:','quota-available-bytes'}    % RFC4331
+          %%{'DAV:','quota-used-bytes'}         % RFC4331
           {'DAV:',resourcetype},
           {'DAV:',supportedlock} % class 2 compliancy
          ],
@@ -636,7 +636,10 @@ allprops(R) ->
                    {'DAV:',displayname}
                   ]
          end,
-    P1++P2++P3.
+    %?DEBUG(" list extended properties~n",[]),
+    Path = davpath(A),
+    P4 = [ xattr2prop(Name) || Name <- xattr:list(Path) ],
+    lists:flatten([P1,P2,P3,P4]).
 
 prop_get({'http://yaws.hyber.org/',access},_A,R) ->
     F = R#resource.info,
@@ -781,10 +784,23 @@ prop_get({'DAV:',supportedlock},_A,_R) ->
             ]}
         ]},
     {200, P};
-prop_get({'',_P},_A,_R) ->
-    throw(400);
-prop_get({NS,P},_A,_R) ->
-    {404,{P,[{'xmlns',NS}],[]}}.
+prop_get({NS,P},A,_R) ->
+    Path = davpath(A),
+    Name = prop2xattr(NS,P),
+    case xattr:get(Path,Name) of
+        {ok,Value} ->
+            V = unicode:characters_to_list(Value),
+            {200, {P,[{'xmlns',NS}],[V]}};
+        {error,enodata} ->
+            {404, {P,[{'xmlns',NS}],[]}};
+        {error,enotsup} ->
+            ?DEBUG("(extended attribute driver not loaded)"),
+            {403, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],["Extended attributes not supported"]}]} };
+        {error,_Reason} ->
+            ?DEBUG("(error writing extended attribute: ~p)",[_Reason]),
+            Msg = io:format("Error reading extended attribute: ~p",[_Reason]),
+            {500, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],[Msg]}]} }
+    end.
 
 
 prop_set({'DAV:',creationdate},A,_R,V) ->
@@ -819,21 +835,73 @@ prop_set({'DAV:',getlastmodified},A,_R,V) ->
         {error,_} ->
             {409, P}
     end;
-%%prop_set({'http://apache.org/dav/props/',executable},_A,R,_V) ->
-%%   {501,{P,[{'xmlns',NS}],[]}}; % Not yet implemented
+prop_set({'http://apache.org/dav/props/',executable},_A,_R,_V) ->
+    {403,{executable,[{'xmlns','http://apache.org/dav/props/'}],[],[{'cannot-modify-protected-property',[],[]}]}};
 prop_set({'DAV:',getetag},_A,_R,_V) ->
     {403,{'D:getetag',[],[{'cannot-modify-protected-property',[],[]}]}};
 prop_set({'DAV:',lockdiscovery},_A,_R,_V) ->
     {403,{'D:lockdiscovery',[],[{'cannot-modify-protected-property',[],[]}]}};
 prop_set({'DAV:',resourcetype},_A,_R,_V) ->
     {403,{'D:resourcetype',[],[{'cannot-modify-protected-property',[],[]}]}};
-prop_set({NS,P},_A,_R,_V) ->
-    {404,{P,[{'xmlns',NS}],[]}}.
+prop_set({NS,P},A,_R,V) ->
+    Path = davpath(A),
+    Name = prop2xattr(NS,P),
+    Value = unicode:characters_to_binary(V),
+    case xattr:set(Path,Name,Value) of
+        ok ->
+            {200, {P,[{'xmlns',NS}],[]} };
+        {error,enotsup} ->
+            ?DEBUG("(extended attributes not supported)"),
+            {403, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],["Extended attributes not supported"]}]} };
+        {error,_Reason} ->
+            ?DEBUG("(error writing extended attribute: ~p)",[_Reason]),
+            Msg = io:format("Error writing extended attribute: ~p",[_Reason]),
+            {500, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],[Msg]}]} }
+    end.
 
 
-prop_remove({P,NS},_A,_R) ->
-    {403,{P,[{'xmlns',NS}],[]}}.
-
+prop_remove({'http://yaws.hyber.org/',access},_A,_R) ->
+    {403,{access,[{'xmlns','http://yaws.hyber.org/'}],[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',creationdate},_A,_R) ->
+    {403,{'D:creationdate',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',getcontentlength},_A,_R) ->
+    {403,{'D:getcontentlength',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',getetag},_A,_R) ->
+    {403,{'D:getetag',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',getlastmodified},_A,_R) ->
+    {403,{'D:getlastmodified',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',lockdiscovery},_A,_R) ->
+    {403,{'D:lockdiscovery',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',resourcetype},_A,_R) ->
+    {403,{'D:resourcetype',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',supportedlock},_A,_R) ->
+    {403,{'D:supportedlock',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',childcount},_A,_R) ->
+    {403,{'D:childcount',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'http://apache.org/dav/props/',executable},_A,_R) ->
+    {403,{executable,[{'xmlns','http://apache.org/dav/props/'}],[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',isfolder},_A,_R) ->
+    {403,{'D:isfolder',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',ishidden},_A,_R) ->
+    {403,{'D:ishidden',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({'DAV:',displayname},_A,_R) ->
+    {403,{'D:displayname',[],[{'cannot-modify-protected-property',[],[]}]}};
+prop_remove({NS,P},A,_R) ->
+    Path = davpath(A),
+    Name = prop2xattr(NS,P),
+    case xattr:remove(Path,Name) of
+        ok ->
+            {200, {P,[{'xmlns',NS}],[]} };
+        {error,enodata} ->
+            {200, {P,[{'xmlns',NS}],[]}}; % 200 even if property does not exist
+        {error,enotsup} ->
+            ?DEBUG("(extended attributes not supported)"),
+            {403, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],["Extended attributes not supported"]}]} };
+        {error,_Reason} ->
+            ?DEBUG("(error removing extended attribute: ~p)",[_Reason]),
+            Msg = io:format("Error removing extended attribute: ~p",[_Reason]),
+            {500, {P,[{'xmlns',NS}],[{'D:error',[{'xmlns:D',"DAV:"}],[Msg]}]} }
+    end.
 
 prop_get_format(type,write) ->
     {'D:write',[],[]};
@@ -857,6 +925,30 @@ prop_get_format(_Something,_) ->
     ?DEBUG(" did not expect ~p here ~n",[_Something]),
     throw(500).
 
+
+prop2xattr(NS,P) when is_atom(NS) ->
+    prop2xattr(atom_to_list(NS),P);
+prop2xattr(NS,P) when is_atom(P) ->
+    prop2xattr(NS,atom_to_list(P));
+prop2xattr(NS,P) -> % Name = "NS":"P"
+    Name = lists:flatten([34,NS,34,58,34,P,34]),
+    unicode:characters_to_binary(Name).
+
+xattr2prop(Name) -> % "NS":"P" = Name
+    {NS,P} = xattr2prop(Name,[],[],start),
+    {unicode:characters_to_list(NS),unicode:characters_to_list(P)}.
+xattr2prop([],NS,P,_ready) ->
+    {NS,P};
+xattr2prop([34|T],[],[],start) ->
+    xattr2prop(T,[],[],namespace);
+xattr2prop([34,58,34|T],NS,[],namespace) ->
+    xattr2prop(T,NS,[],property);
+xattr2prop([H|T],NS,[],namespace) ->
+    xattr2prop(T,NS++[H],[],namespace);
+xattr2prop([34],NS,P,property) ->
+    xattr2prop([],NS,P,ready);
+xattr2prop([H|T],NS,P,property) ->
+    xattr2prop(T,NS,P++[H],property).
 
 %% --------------------------------------------------------
 %% Resource mapping
@@ -1174,6 +1266,7 @@ parse_propfind(L) ->
         {?IS_PROPFIND(X),_} ->
             parse_propfind(?CONTENT(X),[]);
         _Z ->
+            %?DEBUG("~n~p~n",[_Z]),
             throw(400)
     end.
 parse_propfind([?IS_PROPNAME(_H)|_T], _R) ->
@@ -1219,13 +1312,13 @@ parse_prop([H|T],L) ->
         H when is_record(H,xmlElement) ->
             %% check on supported namespaces:
             %% - http://www.w3.org/TR/RC-xml-names#dt-prefix
-            %% - although strict, not very forgiving towards clients
-            %%NS = H#xmlElement.namespace,
-            %%case NS#xmlNamespace.default of
-            %%    "" ->
-            %%        throw(400);
-            %%    _ -> ok
-            %%end,
+            %% - although strict, not very forgiving towards clients ...
+            NS = H#xmlElement.namespace,
+            case NS#xmlNamespace.default of
+                "" ->
+                    throw(400);
+                _ -> ok
+            end,
             Value = case H#xmlElement.content of
                         [C] when is_record(C,xmlText) -> C#xmlText.value;
                         _ -> ""

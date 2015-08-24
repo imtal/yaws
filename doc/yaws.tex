@@ -2814,15 +2814,16 @@ The following directives are allowed inside a server definition.
                 \item PROPFIND and PROPPATCH methods returning properties asked for
                 \item all RFC4918 properties, the Apache executable property plus
                       some Microsoft extensions
+                \item all other properties through file system extended attributes
                 \item locking mechanism (class 2 compliancy) on all destructive methods
                 \item If header parsing
-                \item Passes most litmus tests, except those concerning unknown
-                      properties
+                \item Passes all litmus 0.13 tests
               \end{itemize}
               If WebDAV is turned on, processing of \verb+.yaws+ pages is turned off.
               Default is false. The \verb+dav=true+ configuration option is short for:
 \begin{verbatim}
   runmod = yaws_runmod_lock
+  runmod = xattr
   ...
   <server>
       ...

@@ -1309,11 +1309,17 @@ fload(FD, server, GC, C, Lno, Chars) ->
                               true ->
                                   GC
                           end,
+                    GC2 = case lists:member(xattr, Runmods) of
+                              false ->
+                                  GC1#gconf{runmods=[xattr|Runmods]};
+                              true ->
+                                  GC1
+                          end,
                     DavAppmods = lists:keystore(yaws_appmod_dav, 2,
                                                 C1#sconf.appmods,
                                                 {"/",yaws_appmod_dav}),
                     C2 = C1#sconf{appmods=DavAppmods},
-                    fload(FD, server, GC1, C2, Lno+1, ?NEXTLINE);
+                    fload(FD, server, GC2, C2, Lno+1, ?NEXTLINE);
                 {true,false} ->
                     C1 = ?sc_set_dav(C, false),
                     fload(FD, server, GC, C1, Lno+1, ?NEXTLINE);

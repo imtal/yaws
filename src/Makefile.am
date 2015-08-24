@@ -25,6 +25,7 @@ STATIC_MODULES = yaws.erl			\
 		 yaws_rss.erl			\
 		 yaws_appmod_dav.erl		\
 		 yaws_runmod_lock.erl		\
+		 xattr.erl                  \
 		 yaws_pam.erl			\
 		 json.erl			\
 		 json2.erl			\

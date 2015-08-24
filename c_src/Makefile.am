@@ -9,7 +9,7 @@ if WITH_EPAM
   epam_SOURCES = epam.c
 endif
 
-lib_LTLIBRARIES = setuid_drv.la
+lib_LTLIBRARIES = setuid_drv.la xattr_drv.la
 
 setuid_drv_la_CFLAGS  = $(EXTRAINCLUDE) -I$(ERLANG_ERTS_DIR)/include
 setuid_drv_la_LDFLAGS =  -module  -avoid-version
@@ -21,6 +21,10 @@ if HAVE_SENDFILE
   yaws_sendfile_drv_la_LDFLAGS = -module  -avoid-version
   yaws_sendfile_drv_la_SOURCES = yaws_sendfile_drv.c hashtable.c hashtable.h hashtable_private.h
 endif
+
+xattr_drv_la_CFLAGS  = $(EXTRAINCLUDE) -I$(ERLANG_ERTS_DIR)/include
+xattr_drv_la_LDFLAGS =  -module  -avoid-version
+xattr_drv_la_SOURCES = xattr_drv.c
 
 all-local: post-build
 
@@ -35,6 +39,7 @@ if WITH_EPAM
 endif
 	$(AM_V_at)$(INSTALL) -m 644 .libs/setuid_drv.so @top_builddir@/priv/lib
 	$(AM_V_at)$(INSTALL) -m 644 .libs/yaws_sendfile_drv.so @top_builddir@/priv/lib
+	$(AM_V_at)$(INSTALL) -m 644 .libs/xattr_drv.so @top_builddir@/priv/lib
 
 # Local Variables:
 #    tab-width: 8
