@@ -82,7 +82,6 @@ started() ->
 %% init/1
 init([]) ->
     % Table is a tree consisting of {Name, Locks, Children} tuples
-    error_logger:info_msg("Initializing resource locking server ...~n"),
     Table = [],
     erlang:send_after(?CLEANUP_INTERVAL*1000, self(), cleanup),
     {ok, Table}.
